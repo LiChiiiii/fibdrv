@@ -17,34 +17,79 @@ MODULE_VERSION("0.1");
 /* MAX_LENGTH is set to 92 because
  * ssize_t can't fit the number > 92
  */
-#define MAX_LENGTH 92
+#define MAX_LENGTH 100
 
 static dev_t fib_dev = 0;
 static struct cdev *fib_cdev;
 static struct class *fib_class;
 static DEFINE_MUTEX(fib_mutex);
 
-static long long fib_sequence(long long k)
+typedef unsigned __int128 uint128_t;
+
+void reverse_str(char *str, int len)
 {
-    long long a = 0, b = 1;
-    // Get the number of binary digits in k
+    int start = 0;
+    int end = len - 1;
+    while (start < end) {
+        char temp = str[start];
+        str[start] = str[end];
+        str[end] = temp;
+        start++;
+        end--;
+    }
+}
+
+char *uint128_to_string(__int128 num, char *buffer, int bufferSize)
+{
+    if (num == 0) {
+        buffer[0] = '0';
+        buffer[1] = '\0';
+        return buffer;
+    }
+
+    int i = 0;
+    while (num > 0) {
+        unsigned long remainder = num % 10;
+        buffer[i++] = '0' + remainder;
+        num /= 10;
+    }
+
+    buffer[i] = '\0';
+    reverse_str(buffer, i);
+
+    return buffer;
+}
+
+static long long fib_sequence(long long k, char *buf)
+{
+    uint128_t a = 0;
+    uint128_t b = 1;
+
     int num_bits = sizeof(k) * 8 - __builtin_clzll(k);
 
     for (int i = num_bits; i >= 1; i--) {
-        long long temp1 = a * (2 * b - a);
-        long long temp2 = b * b + a * a;
+        uint128_t temp1 = a * ((b << 1) - a);
+        uint128_t temp2 = b * b + a * a;
         a = temp1;
         b = temp2;
 
-        // Check the i-th bit of k
         if ((k >> (i - 1)) & 1) {
             temp1 = a + b;
             a = b;
             b = temp1;
         }
     }
+    char buffer[41];
+    char *str = uint128_to_string(a, buffer, sizeof(buffer));
+    int len = strlen(str) + 1;
 
-    return a;
+    int test = __copy_to_user(buf, str, len);
+    if (test) {
+        printk("The copy from kernel to user is fail.");
+        return -1;
+    }
+
+    return len;
 }
 
 static int fib_open(struct inode *inode, struct file *file)
@@ -68,7 +113,8 @@ static ssize_t fib_read(struct file *file,
                         size_t size,
                         loff_t *offset)
 {
-    return (ssize_t) fib_sequence(*offset);
+    return fib_sequence(*offset, buf);
+    ;
 }
 
 /* write operation is skipped */
